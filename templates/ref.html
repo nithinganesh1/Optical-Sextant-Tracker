@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>Sun Tracker — Optical Sextant Simulator</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<style>
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: #090b10;
+  }
+  .font-mono-code {
+    font-family: 'JetBrains Mono', monospace;
+  }
+  /* Precise technical optical ray strokes */
+  .ray-pulse {
+    stroke-dasharray: 6 5;
+    animation: rayFlow 1.4s linear infinite;
+  }
+  @keyframes rayFlow {
+    from { stroke-dashoffset: 22; }
+    to { stroke-dashoffset: 0; }
+  }
+  /* Custom slider track */
+  input[type=range] {
+    -webkit-appearance: none;
+    background: transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 3px;
+    background: #1c2230;
+    border-radius: 9999px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 13px;
+    width: 13px;
+    border-radius: 50%;
+    background: #f1f5f9;
+    border: 2px solid #090b10;
+    box-shadow: 0 0 0 1px #475569;
+    margin-top: -5px;
+    cursor: grab;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+  }
+  input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.18);
+    background: #38bdf8;
+  }
+  input[type=range]:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: scale(1.1);
+  }
+</style>
+</head>
+<body class="text-slate-300 min-h-screen flex flex-col selection:bg-slate-800 selection:text-white antialiased">
+<!-- Minimal Header -->
+<header class="border-b border-[#1b2230] px-7 py-3 flex items-center justify-between text-xs">
+<div class="flex items-center space-x-4">
+<div class="flex items-center space-x-2.5">
+<span class="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
+<span class="text-slate-100 font-semibold tracking-wider text-[13px] font-mono-code uppercase">Sun Tracker</span>
+</div>
+<span class="text-slate-700">|</span>
+<span class="text-slate-500 font-mono-code tracking-tight text-[11px] hidden sm:inline">Double Reflection Optical Sextant</span>
+</div>
+<!-- Minimalist Status Indicators -->
+<div class="flex items-center space-x-6 text-[12px] font-mono-code">
+<div class="flex items-center space-x-2">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400" id="headerStatusDot"></span>
+<span class="text-slate-300 font-medium" id="hdr_tracking">TRACKING</span>
+<span class="text-slate-600">•</span>
+<span class="text-slate-100 font-semibold" id="hdr_sun">41.00°</span>
+</div>
+<div class="hidden md:flex items-center space-x-1.5 text-slate-500">
+<span>INDEX</span>
+<span class="text-slate-300" id="hdr_mirror">20.50°</span>
+</div>
+<div class="hidden lg:flex items-center space-x-1.5 text-slate-500">
+<span>LIMIT</span>
+<span class="text-slate-400" id="hdr_limit">OK</span>
+</div>
+</div>
+</header>
+<!-- Main Viewport -->
+<main class="flex-1 grid grid-cols-12 gap-5 p-5 lg:p-7 max-w-[1760px] mx-auto w-full">
+<!-- LEFT & CENTER: Optical Raypath Simulator (8 cols on XL) -->
+<section class="col-span-12 xl:col-span-8 flex flex-col space-y-3">
+<div class="relative bg-[#0d1117] border border-[#1b2230] rounded-lg overflow-hidden flex-1 flex flex-col">
+<!-- Diagram Top Bar -->
+<div class="px-5 py-2.5 border-b border-[#18202e] flex items-center justify-between text-xs">
+<div class="flex items-center space-x-3">
+<span class="text-[11px] uppercase tracking-wider font-mono-code text-slate-400 font-medium">Z-Ray Optical Path</span>
+<span class="text-slate-700 font-mono-code">•</span>
+<span class="text-[11px] font-mono-code text-slate-500 hidden md:inline">Sun → Mirror B (θ) → Mirror A (60°) → Sensor C</span>
+</div>
+<div class="flex items-center space-x-2">
+<button class="px-2.5 py-1 rounded text-[11px] font-mono-code bg-[#141b27] hover:bg-[#1a2333] border border-[#222c3e] text-slate-300 transition flex items-center gap-1.5" id="toggleAutoOrbit">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-400" id="orbitDot"></span>
+<span id="orbitLabel">Auto Orbit</span>
+</button>
+<button class="px-2.5 py-1 rounded text-[11px] font-mono-code bg-[#141b27] hover:bg-[#1a2333] text-slate-400 hover:text-slate-200 border border-[#222c3e] transition" id="resetOpticsBtn">
+              Calibrate
+            </button>
+</div>
+</div>
+<!-- SVG Interactive Canvas -->
+<div class="relative flex-1 min-h-[500px] flex items-center justify-center select-none overflow-hidden" id="diagramContainer">
+<!-- Subtle clean grid dots -->
+<div class="absolute inset-0 opacity-[0.035] pointer-events-none" style="background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 24px 24px;"></div>
+<svg class="w-full h-full max-h-[560px]" id="opticalSvg" preserveaspectratio="xMidYMid meet" viewbox="0 0 920 600">
+<defs>
+<lineargradient id="mirrorGlassGrad" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#475569"></stop>
+<stop offset="50%" stop-color="#94a3b8"></stop>
+<stop offset="100%" stop-color="#334155"></stop>
+</lineargradient>
+<!-- Radial glow for clean sun -->
+<radialgradient cx="50%" cy="50%" id="sunGlowGrad" r="50%">
+<stop offset="0%" stop-color="#fef08a" stop-opacity="1"></stop>
+<stop offset="40%" stop-color="#f59e0b" stop-opacity="0.85"></stop>
+<stop offset="100%" stop-color="#d97706" stop-opacity="0"></stop>
+</radialgradient>
+</defs>
+<!-- Horizon Sea Line Reference (Minimalist) -->
+<line opacity="0.45" stroke="#f59e0b" stroke-dasharray="3 4" stroke-width="1" x1="20" x2="140" y1="310" y2="310"></line>
+<text fill="#ca8a04" font-family="'JetBrains Mono', monospace" font-size="9" letter-spacing="1" x="25" y="303">HORIZON REF</text>
+<!-- Direct Horizon Beam into Split Mirror A (Blue Beam) -->
+<line class="ray-pulse" opacity="0.8" stroke="#38bdf8" stroke-width="1.5" x1="20" x2="330" y1="310" y2="310"></line>
+<!-- SEXTANT GRADUATED ARC (Cleaned brass limb) -->
+<g id="sextantArcGroup">
+<path d="M 215,490 A 360,360 0 0,0 710,515" fill="none" stroke="#2a2318" stroke-linecap="round" stroke-width="22"></path>
+<path d="M 215,490 A 360,360 0 0,0 710,515" fill="none" stroke="#714e1a" stroke-linecap="round" stroke-width="1.5"></path>
+<!-- Degree Tick Marks generated by script -->
+<g fill="#a17028" font-family="'JetBrains Mono', monospace" font-size="8.5" id="arcTicksGroup"></g>
+<text fill="#92621c" font-family="'JetBrains Mono', monospace" font-size="9.5" font-weight="500" letter-spacing="1" x="225" y="470">SEXTANT LIMB (0° - 120°)</text>
+</g>
+<!-- INDEX ARM (Pivot B down to arc scale) -->
+<g id="indexArmGroup">
+<line id="indexArmBar" stroke="#1f2937" stroke-linecap="round" stroke-width="5" x1="510" x2="620" y1="190" y2="505"></line>
+<line id="indexArmHighlight" stroke="#64748b" stroke-linecap="round" stroke-width="1.5" x1="510" x2="620" y1="190" y2="505"></line>
+<!-- Arm indicator pointer -->
+<circle cx="620" cy="505" fill="#0d1117" id="indexArmPointerRing" r="5" stroke="#e2e8f0" stroke-width="1.5"></circle>
+<polygon fill="#e2e8f0" id="indexArmArrow" points="620,512 616,502 624,502"></polygon>
+</g>
+<!-- ================= OPTICAL Z-RAY ================= -->
+<!-- 1. Sun Incident Beam (Sun -> Mirror B) -->
+<line class="ray-pulse" id="raySunToB" opacity="0.95" stroke="#f43f5e" stroke-width="1.75" x1="120" x2="510" y1="120" y2="190"></line>
+<polygon fill="#f43f5e" id="arrowSunB1" points="260,135 270,138 262,145"></polygon>
+<!-- 2. Reflected Beam (Mirror B -> Mirror A) -->
+<line class="ray-pulse" id="rayBToA" opacity="0.95" stroke="#f43f5e" stroke-width="1.75" x1="510" x2="330" y1="190" y2="310"></line>
+<polygon fill="#f43f5e" id="arrowBA1" points="426,242 416,248 420,256"></polygon>
+<!-- 3. Combined Ray (Mirror A -> Telescope C) -->
+<line class="ray-pulse" id="rayAToC_red" opacity="0.95" stroke="#f43f5e" stroke-width="1.75" x1="330" x2="590" y1="309" y2="309"></line>
+<line class="ray-pulse" id="rayAToC_blue" opacity="0.85" stroke="#38bdf8" stroke-width="1.5" x1="330" x2="590" y1="311" y2="311"></line>
+<polygon fill="#f43f5e" points="450,307 458,309 450,311"></polygon>
+<polygon fill="#38bdf8" points="480,309 488,311 480,313"></polygon>
+<!-- Baseline & Angle θ at Mirror B -->
+<line id="refAngleDash" stroke="#475569" stroke-dasharray="3 3" stroke-width="1" x1="420" x2="510" y1="190" y2="190"></line>
+<path d="M 465,190 A 45,45 0 0,0 475,176" fill="none" id="angleArcB" stroke="#64748b" stroke-width="1"></path>
+<text fill="#94a3b8" font-family="'JetBrains Mono', monospace" font-size="11" id="angleLabelB" x="435" y="182">20.5°</text>
+<!-- ================= OPTICAL HARDWARE ================= -->
+<!-- SUN ELEMENT -->
+<g class="cursor-grab active:cursor-grabbing transition-transform" id="sunGroup">
+<circle cx="120" cy="120" fill="url(#sunGlowGrad)" id="sunRaysGlow" r="32"></circle>
+<circle cx="120" cy="120" fill="#ffffff" id="sunCore" r="14" stroke="#fbbf24" stroke-width="2"></circle>
+<circle cx="120" cy="120" fill="#ef4444" r="2"></circle>
+<text fill="#94a3b8" font-family="'JetBrains Mono', monospace" font-size="10" id="sunText" letter-spacing="1" text-anchor="middle" x="120" y="88">SUN</text>
+</g>
+<!-- MIRROR B: Rotating Index Mirror -->
+<g id="mirrorBContainer" transform="translate(510, 190)">
+<circle cx="0" cy="0" fill="#111827" r="18" stroke="#334155" stroke-width="1.5"></circle>
+<circle cx="0" cy="0" fill="#64748b" r="2"></circle>
+<!-- Rotating Glass -->
+<g id="mirrorBRotating">
+<rect fill="url(#mirrorGlassGrad)" height="68" rx="1" stroke="#64748b" stroke-width="1" width="6" x="-3" y="-34"></rect>
+<line stroke="#f8fafc" stroke-width="1.5" x1="-3" x2="-3" y1="-32" y2="32"></line>
+<rect fill="#1e293b" height="18" rx="1" width="10" x="-5" y="-9"></rect>
+<circle cx="0" cy="0" fill="#f43f5e" r="2.5"></circle>
+</g>
+<text fill="#e2e8f0" font-family="sans-serif" font-size="14" font-weight="600" x="18" y="-22">B</text>
+<text fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="9" x="18" y="-10">INDEX</text>
+</g>
+<!-- MIRROR A: Fixed 60° Horizon Mirror -->
+<g id="mirrorAContainer" transform="translate(330, 310)">
+<circle cx="0" cy="0" fill="#111827" r="16" stroke="#334155" stroke-width="1.5"></circle>
+<g id="mirrorAFixed" transform="rotate(60)">
+<!-- Split mirror: Silvered half -->
+<rect fill="url(#mirrorGlassGrad)" height="28" rx="1" stroke="#64748b" stroke-width="1" width="6" x="-3" y="-28"></rect>
+<line stroke="#f8fafc" stroke-width="1.5" x1="-3" x2="-3" y1="-26" y2="0"></line>
+<!-- Clear transmission half -->
+<rect fill="#38bdf8" fill-opacity="0.12" height="28" rx="1" stroke="#38bdf8" stroke-dasharray="2 2" stroke-width="1" width="6" x="-3" y="0"></rect>
+<rect fill="#1e293b" height="14" rx="1" width="10" x="-5" y="-7"></rect>
+</g>
+<text fill="#e2e8f0" font-family="sans-serif" font-size="14" font-weight="600" x="-32" y="24">A</text>
+<text fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="9" x="-48" y="36">HORIZON 60°</text>
+</g>
+<!-- TELESCOPE SENSOR C -->
+<g id="telescopeContainer" transform="translate(590, 292)">
+<path d="M 0,14 L 38,14 L 46,9 L 78,9 L 85,13 L 95,13 L 95,25 L 85,25 L 78,29 L 46,29 L 38,24 L 0,24 Z" fill="#131c2b" stroke="#334155" stroke-width="1.25"></path>
+<line stroke="#38bdf8" stroke-width="1.5" x1="0" x2="0" y1="14" y2="24"></line>
+<text fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="9" x="32" y="44">TELESCOPE</text>
+</g>
+<!-- EYEPIECE C — MINIMAL SPLIT VIEW -->
+<g id="fovCircleGroup" transform="translate(775, 310)">
+<!-- Eyepiece Bezel -->
+<circle cx="0" cy="0" fill="#090d16" r="48" stroke="#4a3717" stroke-width="3"></circle>
+<!-- Clip path to keep within circle -->
+<clippath id="fovClip">
+<circle cx="0" cy="0" r="46"></circle>
+</clippath>
+<g clip-path="url(#fovClip)">
+<!-- Left Semi-Circle: Real Sea Horizon -->
+<path d="M 0,-48 A 48,48 0 0,0 0,48 Z" fill="#854d0e" fill-opacity="0.35"></path>
+<!-- Horizon sea surface -->
+<rect fill="#451a03" fill-opacity="0.5" height="48" width="48" x="-48" y="0"></rect>
+<line stroke="#fef08a" stroke-width="1.5" x1="-48" x2="0" y1="0" y2="0"></line>
+<!-- Right Semi-Circle: Reflected Sun Beam -->
+<path d="M 0,-48 A 48,48 0 0,1 0,48 Z" fill="#991b1b" fill-opacity="0.2"></path>
+<!-- Reflected Sun Disk in Right Half -->
+<g id="splitSunGroup">
+<circle cx="6" cy="0" fill="#ffffff" id="splitSunDisk" r="18" stroke="#f59e0b" stroke-width="1.5"></circle>
+</g>
+<!-- Clean Divider Line -->
+<line stroke="#1e293b" stroke-width="1.5" x1="0" x2="0" y1="-48" y2="48"></line>
+<!-- Crosshair -->
+<line opacity="0.8" stroke="#f43f5e" stroke-width="0.75" x1="-8" x2="8" y1="0" y2="0"></line>
+<line opacity="0.8" stroke="#f43f5e" stroke-width="0.75" x1="0" x2="0" y1="-8" y2="8"></line>
+</g>
+<text fill="#e2e8f0" font-family="sans-serif" font-size="14" font-weight="600" x="60" y="4">C</text>
+<text fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="9" x="-32" y="62">SPLIT VIEW</text>
+</g>
+</svg>
+</div>
+<!-- Clean Interactive Controls Footer -->
+<div class="px-5 py-3.5 border-t border-[#18202e] bg-[#090d14]/70 grid grid-cols-1 md:grid-cols-3 gap-5 text-xs font-mono-code items-center">
+<!-- Sun Altitude Slider -->
+<div class="space-y-1">
+<div class="flex justify-between items-center text-[11px]">
+<span class="text-slate-400">Sun Altitude (α)</span>
+<span class="text-slate-100 font-semibold" id="sliderSunVal">41.00°</span>
+</div>
+<input class="w-full" id="sunSlider" max="85" min="5" step="0.25" type="range" value="41"/>
+</div>
+<!-- Mirror B Angle Slider -->
+<div class="space-y-1">
+<div class="flex justify-between items-center text-[11px]">
+<span class="text-slate-400">Mirror B Angle (θ)</span>
+<span class="text-slate-100 font-semibold" id="sliderMirrorVal">20.50°</span>
+</div>
+<input class="w-full" id="mirrorSlider" max="60" min="0" step="0.1" type="range" value="20.5"/>
+</div>
+<!-- Quick Auto Align Action -->
+<div class="flex items-center space-x-3 justify-end pt-1 md:pt-0">
+<span class="text-[10px] font-mono-code px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" id="coincidenceStatus">LOCKED</span>
+<button class="px-3 py-1.5 rounded bg-[#162030] hover:bg-[#1e2c42] text-slate-200 text-xs border border-[#24334a] transition" id="lockToSunBtn">
+              Lock θ = α/2
+            </button>
+</div>
+</div>
+</div>
+</section>
+<!-- RIGHT: Unified Sleek Telemetry & Cameras (4 cols on XL) -->
+<section class="col-span-12 xl:col-span-4 flex flex-col space-y-4">
+<!-- Telemetry Card -->
+<div class="bg-[#0d1117] border border-[#1b2230] rounded-lg p-5 flex flex-col space-y-4">
+<div class="flex items-center justify-between border-b border-[#18202e] pb-2.5">
+<span class="text-[11px] font-mono-code uppercase tracking-wider text-slate-400 font-medium">Telemetry</span>
+<span class="text-[10px] font-mono-code text-slate-500">10 Hz</span>
+</div>
+<!-- Telemetry Rows -->
+<div class="space-y-2 text-xs font-mono-code">
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">Current Steps</span>
+<span class="text-slate-200 font-semibold" id="steps">2050</span>
+</div>
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">Mirror B (Index)</span>
+<span class="text-slate-200 font-semibold" id="mirror_angle">20.50°</span>
+</div>
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">Sun Altitude</span>
+<span class="text-slate-100 font-semibold" id="sun_angle">41.00°</span>
+</div>
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">Mirror A (Fixed)</span>
+<span class="text-slate-400">60.00°</span>
+</div>
+<div class="flex justify-between items-center py-1 border-t border-[#18202e]/60 pt-2">
+<span class="text-slate-500">Limit Switch</span>
+<span class="text-slate-400" id="limit_switch">RELEASED</span>
+</div>
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">Tracking Loop</span>
+<span class="text-emerald-400" id="tracking">RUNNING</span>
+</div>
+<div class="flex justify-between items-center py-1">
+<span class="text-slate-500">System State</span>
+<span class="text-slate-300" id="status">ONLINE</span>
+</div>
+</div>
+</div>
+<!-- Clean Camera Viewports -->
+<div class="bg-[#0d1117] border border-[#1b2230] rounded-lg p-5 flex flex-col space-y-3 flex-1">
+<div class="flex items-center justify-between border-b border-[#18202e] pb-2.5">
+<span class="text-[11px] font-mono-code uppercase tracking-wider text-slate-400 font-medium">Vision Streams</span>
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+</div>
+<div class="grid grid-cols-2 gap-3 flex-1">
+<!-- Camera 1 -->
+<div class="flex flex-col space-y-1.5">
+<div class="flex justify-between items-center text-[10px] font-mono-code text-slate-500">
+<span>CAM 1 • SKY</span>
+<span>30 FPS</span>
+</div>
+<div class="aspect-video bg-[#080b11] border border-[#18202e] rounded overflow-hidden relative">
+<canvas class="w-full h-full object-cover" height="150" id="cam1Canvas" width="240"></canvas>
+</div>
+</div>
+<!-- Camera 2 -->
+<div class="flex flex-col space-y-1.5">
+<div class="flex justify-between items-center text-[10px] font-mono-code text-slate-500">
+<span>CAM 2 • RETICLE</span>
+<span>LOCK</span>
+</div>
+<div class="aspect-video bg-[#080b11] border border-[#18202e] rounded overflow-hidden relative">
+<canvas class="w-full h-full object-cover" height="150" id="cam2Canvas" width="240"></canvas>
+</div>
+</div>
+</div>
+<!-- Understated Hardware Action Buttons -->
+<div class="grid grid-cols-2 gap-2.5 pt-2 border-t border-[#18202e] text-xs font-mono-code">
+<button class="py-2 px-3 rounded bg-[#131a26] hover:bg-[#1a2333] active:bg-[#0f1520] text-slate-300 border border-[#222c3e] transition text-center font-medium" onclick="post('home')">
+            Home Motor
+          </button>
+<button class="py-2 px-3 rounded bg-[#271518] hover:bg-[#341b20] active:bg-[#1e1013] text-rose-300 border border-[#482027] transition text-center font-medium" id="toggleStopBtn" onclick="toggleTrackingAction()">
+<span id="btnTrackingLabel">Stop Tracking</span>
+</button>
+</div>
+<!-- Terminal-like subtle feedback text -->
+<div class="min-h-[16px] text-center">
+<span class="text-[11px] font-mono-code text-slate-500" id="msg"></span>
+</div>
+</div>
+</section>
+</main>
+<!-- Interactive Logic & Clean Rendering -->
+<script>
+    const state = {
+      steps: 2050,
+      mirror_angle: 20.5,
+      sun_angle: 41.0,
+      mirror_fixed_angle: 60.0,
+      tracking: true,
+      limit_switch: false,
+      status: "ONLINE",
+      autoOrbit: true
+    };
+
+    const elements = {
+      steps: document.getElementById("steps"),
+      mirror_angle: document.getElementById("mirror_angle"),
+      sun_angle: document.getElementById("sun_angle"),
+      tracking: document.getElementById("tracking"),
+      limit_switch: document.getElementById("limit_switch"),
+      status: document.getElementById("status"),
+      hdr_tracking: document.getElementById("hdr_tracking"),
+      hdr_mirror: document.getElementById("hdr_mirror"),
+      hdr_sun: document.getElementById("hdr_sun"),
+      hdr_limit: document.getElementById("hdr_limit"),
+      headerStatusDot: document.getElementById("headerStatusDot"),
+      sunSlider: document.getElementById("sunSlider"),
+      mirrorSlider: document.getElementById("mirrorSlider"),
+      sliderSunVal: document.getElementById("sliderSunVal"),
+      sliderMirrorVal: document.getElementById("sliderMirrorVal"),
+      btnTrackingLabel: document.getElementById("btnTrackingLabel"),
+      toggleStopBtn: document.getElementById("toggleStopBtn"),
+      coincidenceStatus: document.getElementById("coincidenceStatus"),
+      msg: document.getElementById("msg"),
+      orbitLabel: document.getElementById("orbitLabel"),
+      orbitDot: document.getElementById("orbitDot")
+    };
+
+    const PIVOT_B = { x: 510, y: 190 };
+    const ARC_CENTER = { x: 510, y: 190 };
+    const ARC_RADIUS = 350;
+
+    // Build Brass Limb Ticks
+    function buildArcTicks() {
+      const g = document.getElementById("arcTicksGroup");
+      g.innerHTML = "";
+      for (let deg = 0; deg <= 120; deg += 5) {
+        const rad = (70 + (deg * 0.35)) * Math.PI / 180;
+        const x1 = ARC_CENTER.x + (ARC_RADIUS - 4) * Math.cos(rad);
+        const y1 = ARC_CENTER.y + (ARC_RADIUS - 4) * Math.sin(rad);
+        const isMajor = deg % 10 === 0;
+        const tickLen = isMajor ? 8 : 4;
+        const x2 = ARC_CENTER.x + (ARC_RADIUS + tickLen) * Math.cos(rad);
+        const y2 = ARC_CENTER.y + (ARC_RADIUS + tickLen) * Math.sin(rad);
+
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", x1);
+        line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2);
+        line.setAttribute("y2", y2);
+        line.setAttribute("stroke", isMajor ? "#a17028" : "#5a3d16");
+        line.setAttribute("stroke-width", isMajor ? "1" : "0.75");
+        g.appendChild(line);
+
+        if (isMajor) {
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          const tx = ARC_CENTER.x + (ARC_RADIUS + 16) * Math.cos(rad);
+          const ty = ARC_CENTER.y + (ARC_RADIUS + 16) * Math.sin(rad) + 3;
+          text.setAttribute("x", tx);
+          text.setAttribute("y", ty);
+          text.setAttribute("text-anchor", "middle");
+          text.textContent = deg;
+          g.appendChild(text);
+        }
+      }
+    }
+    buildArcTicks();
+
+    function updateOptics() {
+      // 1. Sun Position
+      const sunRad = state.sun_angle * Math.PI / 180;
+      const sunDist = 410;
+      const sunX = PIVOT_B.x - sunDist * Math.cos(sunRad * 0.85 + 0.1);
+      const sunY = PIVOT_B.y - sunDist * Math.sin(sunRad * 0.85 + 0.1);
+
+      document.getElementById("sunRaysGlow").setAttribute("cx", sunX);
+      document.getElementById("sunRaysGlow").setAttribute("cy", sunY);
+      document.getElementById("sunCore").setAttribute("cx", sunX);
+      document.getElementById("sunCore").setAttribute("cy", sunY);
+      document.getElementById("sunText").setAttribute("x", sunX);
+      document.getElementById("sunText").setAttribute("y", sunY - 26);
+
+      // 2. Incident Beam Sun -> B
+      const raySunB = document.getElementById("raySunToB");
+      raySunB.setAttribute("x1", sunX);
+      raySunB.setAttribute("y1", sunY);
+      raySunB.setAttribute("x2", PIVOT_B.x);
+      raySunB.setAttribute("y2", PIVOT_B.y);
+
+      const mid1X = sunX + (PIVOT_B.x - sunX) * 0.45;
+      const mid1Y = sunY + (PIVOT_B.y - sunY) * 0.45;
+      const angleSunB = Math.atan2(PIVOT_B.y - sunY, PIVOT_B.x - sunX);
+      
+      const drawArrow = (elId, x, y, ang) => {
+        const el = document.getElementById(elId);
+        const p1 = `${x + 8 * Math.cos(ang)},${y + 8 * Math.sin(ang)}`;
+        const p2 = `${x + 6 * Math.cos(ang + 2.5)},${y + 6 * Math.sin(ang + 2.5)}`;
+        const p3 = `${x + 6 * Math.cos(ang - 2.5)},${y + 6 * Math.sin(ang - 2.5)}`;
+        el.setAttribute("points", `${p1} ${p2} ${p3}`);
+      };
+      drawArrow("arrowSunB1", mid1X, mid1Y, angleSunB);
+
+      // 3. Mirror B Tilt & Index Arm
+      const mirrorRot = -state.mirror_angle;
+      document.getElementById("mirrorBRotating").setAttribute("transform", `rotate(${mirrorRot})`);
+      document.getElementById("angleLabelB").textContent = state.mirror_angle.toFixed(1) + "°";
+
+      const armRad = (70 + (state.mirror_angle * 2 * 0.35)) * Math.PI / 180;
+      const armEndX = ARC_CENTER.x + ARC_RADIUS * Math.cos(armRad);
+      const armEndY = ARC_CENTER.y + ARC_RADIUS * Math.sin(armRad);
+
+      const armBar = document.getElementById("indexArmBar");
+      const armHi = document.getElementById("indexArmHighlight");
+      armBar.setAttribute("x2", armEndX);
+      armBar.setAttribute("y2", armEndY);
+      armHi.setAttribute("x2", armEndX);
+      armHi.setAttribute("y2", armEndY);
+
+      document.getElementById("indexArmPointerRing").setAttribute("cx", armEndX);
+      document.getElementById("indexArmPointerRing").setAttribute("cy", armEndY);
+      
+      const armArrow = document.getElementById("indexArmArrow");
+      armArrow.setAttribute("points", `${armEndX},${armEndY+8} ${armEndX-4},${armEndY} ${armEndX+4},${armEndY}`);
+
+      // 4. Split View Coincidence Alignment
+      const errorAngle = (state.sun_angle - (2 * state.mirror_angle));
+      const isCoincident = Math.abs(errorAngle) < 0.6;
+      
+      const splitSun = document.getElementById("splitSunDisk");
+      const yOffset = -errorAngle * 4.2;
+      splitSun.setAttribute("cy", Math.max(-32, Math.min(32, yOffset)));
+      
+      if (isCoincident) {
+        elements.coincidenceStatus.textContent = "COINCIDENT";
+        elements.coincidenceStatus.className = "text-[10px] font-mono-code px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+      } else {
+        elements.coincidenceStatus.textContent = `Δ ${errorAngle > 0 ? "+" : ""}${errorAngle.toFixed(1)}°`;
+        elements.coincidenceStatus.className = "text-[10px] font-mono-code px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20";
+      }
+    }
+
+    function syncUI() {
+      elements.steps.textContent = state.steps;
+      elements.mirror_angle.textContent = state.mirror_angle.toFixed(2) + "°";
+      elements.sun_angle.textContent = state.sun_angle.toFixed(2) + "°";
+      elements.hdr_mirror.textContent = state.mirror_angle.toFixed(2) + "°";
+      elements.hdr_sun.textContent = state.sun_angle.toFixed(2) + "°";
+      
+      elements.sunSlider.value = state.sun_angle;
+      elements.mirrorSlider.value = state.mirror_angle;
+      elements.sliderSunVal.textContent = state.sun_angle.toFixed(2) + "°";
+      elements.sliderMirrorVal.textContent = state.mirror_angle.toFixed(2) + "°";
+
+      elements.tracking.textContent = state.tracking ? "RUNNING" : "STOPPED";
+      elements.tracking.className = state.tracking ? "text-emerald-400" : "text-rose-400";
+      
+      elements.hdr_tracking.textContent = state.tracking ? "TRACKING" : "STANDBY";
+      elements.headerStatusDot.className = state.tracking ? "w-1.5 h-1.5 rounded-full bg-emerald-400" : "w-1.5 h-1.5 rounded-full bg-rose-400";
+
+      elements.limit_switch.textContent = state.limit_switch ? "ENGAGED" : "RELEASED";
+      elements.hdr_limit.textContent = state.limit_switch ? "ENGAGED" : "OK";
+
+      elements.btnTrackingLabel.textContent = state.tracking ? "Stop Tracking" : "Resume Tracking";
+      elements.toggleStopBtn.className = state.tracking 
+        ? "py-2 px-3 rounded bg-[#271518] hover:bg-[#341b20] active:bg-[#1e1013] text-rose-300 border border-[#482027] transition text-center font-medium"
+        : "py-2 px-3 rounded bg-[#13281e] hover:bg-[#193729] active:bg-[#0d1c14] text-emerald-300 border border-[#1f4832] transition text-center font-medium";
+
+      updateOptics();
+    }
+
+    function toggleTrackingAction() {
+      state.tracking = !state.tracking;
+      post(state.tracking ? "resume" : "stop");
+      syncUI();
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const d = await res.json();
+          if (d.steps !== undefined) state.steps = d.steps;
+          if (d.mirror_angle !== undefined) state.mirror_angle = d.mirror_angle;
+          if (d.sun_angle !== undefined) state.sun_angle = d.sun_angle;
+          if (d.tracking !== undefined) state.tracking = d.tracking;
+          if (d.limit_switch !== undefined) state.limit_switch = d.limit_switch;
+          if (d.status !== undefined) state.status = d.status;
+        }
+      } catch (e) {
+        document.getElementById("status").textContent = "SIMULATION";
+      }
+      syncUI();
+    }
+
+    async function post(name) {
+      elements.msg.textContent = `api: ${name}...`;
+      try {
+        const r = await fetch("/api/" + name, { method: "POST" });
+        const d = await r.json().catch(() => ({}));
+        elements.msg.textContent = d.ok ? `OK: ${name}` : (d.error || `dispatched`);
+      } catch (e) {
+        if (name === "home") {
+          state.mirror_angle = 0.0;
+          state.steps = 0;
+          state.limit_switch = true;
+          setTimeout(() => { state.limit_switch = false; syncUI(); }, 1000);
+          elements.msg.textContent = "Homed: 0.00°";
+        } else if (name === "stop") {
+          elements.msg.textContent = "Tracking halted";
+        } else {
+          elements.msg.textContent = `Command sent`;
+        }
+      }
+      syncUI();
+    }
+
+    elements.sunSlider.addEventListener("input", (e) => {
+      state.sun_angle = parseFloat(e.target.value);
+      if (state.tracking) {
+        state.mirror_angle = state.sun_angle / 2;
+        state.steps = Math.round(state.mirror_angle * 100);
+      }
+      syncUI();
+    });
+
+    elements.mirrorSlider.addEventListener("input", (e) => {
+      state.mirror_angle = parseFloat(e.target.value);
+      state.steps = Math.round(state.mirror_angle * 100);
+      syncUI();
+    });
+
+    document.getElementById("lockToSunBtn").addEventListener("click", () => {
+      state.mirror_angle = state.sun_angle / 2;
+      state.steps = Math.round(state.mirror_angle * 100);
+      elements.msg.textContent = `θ = ${state.mirror_angle.toFixed(2)}°`;
+      syncUI();
+    });
+
+    document.getElementById("toggleAutoOrbit").addEventListener("click", () => {
+      state.autoOrbit = !state.autoOrbit;
+      elements.orbitLabel.textContent = state.autoOrbit ? "Auto Orbit" : "Orbit Paused";
+      elements.orbitDot.className = state.autoOrbit ? "w-1.5 h-1.5 rounded-full bg-amber-400" : "w-1.5 h-1.5 rounded-full bg-slate-600";
+    });
+
+    document.getElementById("resetOpticsBtn").addEventListener("click", () => {
+      state.sun_angle = 41.0;
+      state.mirror_angle = 20.5;
+      state.steps = 2050;
+      state.tracking = true;
+      elements.msg.textContent = "Calibrated to 41.00°";
+      syncUI();
+    });
+
+    // Clean drag
+    let isDraggingSun = false;
+    const svgEl = document.getElementById("opticalSvg");
+    const sunGroup = document.getElementById("sunGroup");
+
+    sunGroup.addEventListener("mousedown", () => {
+      isDraggingSun = true;
+      state.autoOrbit = false;
+      elements.orbitLabel.textContent = "Orbit Paused";
+      elements.orbitDot.className = "w-1.5 h-1.5 rounded-full bg-slate-600";
+    });
+    window.addEventListener("mouseup", () => { isDraggingSun = false; });
+    window.addEventListener("mousemove", (e) => {
+      if (!isDraggingSun) return;
+      const pt = svgEl.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const cursorPt = pt.matrixTransform(svgEl.getScreenCTM().inverse());
+      
+      const dx = PIVOT_B.x - cursorPt.x;
+      const dy = PIVOT_B.y - cursorPt.y;
+      let angleDeg = (Math.atan2(dy, dx) * 180 / Math.PI) * 1.15;
+      angleDeg = Math.max(5, Math.min(85, angleDeg));
+      
+      state.sun_angle = angleDeg;
+      if (state.tracking) {
+        state.mirror_angle = state.sun_angle / 2;
+        state.steps = Math.round(state.mirror_angle * 100);
+      }
+      syncUI();
+    });
+
+    // Orbit Animation Loop
+    let orbitTime = 0;
+    function animLoop() {
+      if (state.autoOrbit && state.tracking) {
+        orbitTime += 0.007;
+        const baseElevation = 40 + Math.sin(orbitTime) * 22;
+        state.sun_angle = parseFloat(baseElevation.toFixed(2));
+        state.mirror_angle = parseFloat((state.sun_angle / 2).toFixed(2));
+        state.steps = Math.round(state.mirror_angle * 100);
+        syncUI();
+      }
+      drawCam1();
+      drawCam2();
+      requestAnimationFrame(animLoop);
+    }
+
+    // Camera 1 & 2 Canvases
+    const cam1 = document.getElementById("cam1Canvas").getContext("2d");
+    const cam2 = document.getElementById("cam2Canvas").getContext("2d");
+
+    function drawCam1() {
+      const w = 240, h = 150;
+      cam1.fillStyle = "#090d14";
+      cam1.fillRect(0, 0, w, h);
+      
+      // Clean sky tone
+      const grad = cam1.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, "#0e1e38");
+      grad.addColorStop(0.7, "#6b3f14");
+      grad.addColorStop(1, "#1e1308");
+      cam1.fillStyle = grad;
+      cam1.fillRect(0, 0, w, h);
+
+      const sunY = h * (1 - (state.sun_angle / 90)) * 0.75 + 18;
+      cam1.beginPath();
+      cam1.arc(65, sunY, 11, 0, Math.PI * 2);
+      cam1.fillStyle = "#ffffff";
+      cam1.fill();
+
+      // Mirror B silhouette
+      cam1.save();
+      cam1.translate(180, 100);
+      cam1.rotate(-state.mirror_angle * Math.PI / 180);
+      cam1.fillStyle = "#cbd5e1";
+      cam1.fillRect(-3, -24, 6, 48);
+      cam1.restore();
+    }
+
+    function drawCam2() {
+      const w = 240, h = 150;
+      cam2.fillStyle = "#090d14";
+      cam2.fillRect(0, 0, w, h);
+
+      const cx = w / 2, cy = h / 2, r = 44;
+
+      // Left Horizon
+      cam2.save();
+      cam2.beginPath();
+      cam2.arc(cx, cy, r, Math.PI * 0.5, Math.PI * 1.5);
+      cam2.closePath();
+      cam2.fillStyle = "#5c330e";
+      cam2.fill();
+      
+      cam2.strokeStyle = "#fef08a";
+      cam2.lineWidth = 1;
+      cam2.beginPath();
+      cam2.moveTo(cx - r, cy);
+      cam2.lineTo(cx, cy);
+      cam2.stroke();
+      cam2.restore();
+
+      // Right Sun
+      cam2.save();
+      cam2.beginPath();
+      cam2.arc(cx, cy, r, -Math.PI * 0.5, Math.PI * 0.5);
+      cam2.closePath();
+      cam2.fillStyle = "#7f1d1d";
+      cam2.fill();
+
+      const err = (state.sun_angle - 2 * state.mirror_angle);
+      const sunDiskY = cy - err * 3.2;
+      
+      cam2.beginPath();
+      cam2.arc(cx + 8, sunDiskY, 15, 0, Math.PI * 2);
+      cam2.fillStyle = "#ffffff";
+      cam2.fill();
+      cam2.restore();
+
+      // Divider & Thin Reticle
+      cam2.strokeStyle = "#1e293b";
+      cam2.lineWidth = 1.5;
+      cam2.beginPath();
+      cam2.moveTo(cx, cy - r);
+      cam2.lineTo(cx, cy + r);
+      cam2.stroke();
+
+      cam2.strokeStyle = "#f43f5e";
+      cam2.lineWidth = 0.75;
+      cam2.beginPath();
+      cam2.moveTo(cx - 6, cy);
+      cam2.lineTo(cx + 6, cy);
+      cam2.moveTo(cx, cy - 6);
+      cam2.lineTo(cx, cy + 6);
+      cam2.stroke();
+    }
+
+    syncUI();
+    animLoop();
+    setInterval(refresh, 1000);
+  </script>
+</body></html>

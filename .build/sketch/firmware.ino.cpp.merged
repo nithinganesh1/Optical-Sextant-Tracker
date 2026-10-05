@@ -1,0 +1,300 @@
+#include <Arduino.h>
+#line 1 "/home/nithin/Evolve/Projects/Suntracker_Dash/firmware/firmware.ino"
+// CNC Shield V3 dual-stepper firmware for Sun Tracker
+// X axis = M1 (pins 2,5,9), homed on limit switch
+// Y axis = M2 (pins 3,6), no limit switch
+//
+// Compatible commands kept for the existing Python app:
+//   "HOME"        -> home X axis, set X position to 0
+//   "STOP"        -> stop all motion
+//   "STATUS 1"    -> enable status reporting, replies every 200 ms
+//   "G <abs>"     -> move X axis to absolute step position
+//   "<steps1> <steps2>" -> legacy move X,Y in one command
+// Extra commands added for explicit X/Y motion:
+//   "MOVE X <steps>"
+//   "MOVE Y <steps>"
+//   "HOME X"      -> home X axis
+//   "HOME Y"      -> ignored (Y has no home switch)
+//
+// This matches the requested logic:
+//   1) X homes first
+//   2) Y sweeps/searches for sun
+//   3) when aligned, X moves to the 90° reference (1600 steps)
+//   4) valid operating range is roughly 90°..150°
+
+#define X_STEP_PIN    2
+#define X_DIR_PIN     5
+#define X_LIMIT_PIN   9
+#define Y_STEP_PIN    3
+#define Y_DIR_PIN     6
+#define ENABLE_PIN    8
+
+const unsigned int STEP_INTERVAL_US = 800;
+const long MAX_X_POS = 3200;         // keep in sync with the Python app
+const long HOME_MAX_STEPS = 4000;    // fail if homing does not hit the switch in time
+const long STEPS_FOR_90_DEG = 1600;  // 90 degrees at this gear / microstep setting
+const long STEPS_FOR_150_DEG = 2667; // approx. 150 degrees; range = ~1067 steps
+
+struct AxisState {
+  long stepsRemaining;
+  int currentDir;
+  bool stepPinHigh;
+  unsigned long lastStepMicros;
+  long absoluteSteps;
+};
+
+AxisState xAxis = {0, 1, false, 0, 0};
+AxisState yAxis = {0, 1, false, 0, 0};
+
+void readSerialNonBlocking();
+void stepXHoming();
+void stepAxis(AxisState &axis, uint8_t stepPin, uint8_t dirPin);
+void sendStatus();
+void handleLine(char *s);
+void moveX(long delta);
+void moveY(long delta);
+
+bool xHoming = false;
+bool xHomed = false;
+bool statusOn = false;
+long homeStepsTaken = 0;
+unsigned long lastStatusMs = 0;
+
+char lineBuf[64];
+uint8_t lineLen = 0;
+
+bool xLimitPressed() {
+  return digitalRead(X_LIMIT_PIN) == LOW;
+}
+
+void stopAll() {
+  xAxis.stepsRemaining = 0;
+  yAxis.stepsRemaining = 0;
+  xAxis.stepPinHigh = false;
+  yAxis.stepPinHigh = false;
+  digitalWrite(X_STEP_PIN, LOW);
+  digitalWrite(Y_STEP_PIN, LOW);
+}
+
+void setAxisDirection(AxisState &axis, int pin, long delta) {
+  axis.currentDir = (delta > 0) ? 1 : -1;
+  digitalWrite(pin, axis.currentDir > 0 ? HIGH : LOW);
+}
+
+void startXHoming() {
+  stopAll();
+  digitalWrite(X_DIR_PIN, LOW);  // move toward the home switch
+  homeStepsTaken = 0;
+  xHomed = false;
+  xHoming = true;
+}
+
+void setup() {
+  pinMode(X_STEP_PIN, OUTPUT);
+  pinMode(X_DIR_PIN, OUTPUT);
+  pinMode(X_LIMIT_PIN, INPUT_PULLUP);
+  pinMode(Y_STEP_PIN, OUTPUT);
+  pinMode(Y_DIR_PIN, OUTPUT);
+  pinMode(ENABLE_PIN, OUTPUT);
+  digitalWrite(ENABLE_PIN, LOW);
+  digitalWrite(X_STEP_PIN, LOW);
+  digitalWrite(Y_STEP_PIN, LOW);
+
+  Serial.begin(115200);
+  Serial.setTimeout(0);
+
+  // Automatically start in homing mode so the X axis is zeroed at boot.
+  startXHoming();
+}
+
+void loop() {
+  readSerialNonBlocking();
+
+  if (xHoming) {
+    stepXHoming();
+  } else {
+    stepAxis(xAxis, X_STEP_PIN, X_DIR_PIN);
+    stepAxis(yAxis, Y_STEP_PIN, Y_DIR_PIN);
+  }
+
+  sendStatus();
+}
+
+void stepXHoming() {
+  if (xLimitPressed()) {
+    stopAll();
+    xHoming = false;
+    xHomed = true;
+    xAxis.absoluteSteps = 0;
+    Serial.println("READY");
+    return;
+  }
+
+  if (homeStepsTaken >= HOME_MAX_STEPS) {
+    stopAll();
+    xHoming = false;
+    Serial.println("HOME_FAIL");
+    return;
+  }
+
+  unsigned long now = micros();
+  if (now - xAxis.lastStepMicros < STEP_INTERVAL_US) return;
+  xAxis.lastStepMicros = now;
+  xAxis.stepPinHigh = !xAxis.stepPinHigh;
+  digitalWrite(X_STEP_PIN, xAxis.stepPinHigh ? HIGH : LOW);
+  if (!xAxis.stepPinHigh) {
+    homeStepsTaken++;
+  }
+}
+
+void sendStatus() {
+  if (!statusOn || millis() - lastStatusMs < 200) return;
+  lastStatusMs = millis();
+
+  Serial.print("S "); Serial.print(xAxis.absoluteSteps);
+  Serial.print(' ');  Serial.print(yAxis.absoluteSteps);
+  Serial.print(' ');  Serial.print(xLimitPressed() ? 1 : 0);
+  Serial.print(' ');  Serial.print(xHoming ? 2 : ((xAxis.stepsRemaining > 0 || yAxis.stepsRemaining > 0) ? 1 : 0));
+  Serial.print(' ');  Serial.println(xHomed ? 1 : 0);
+}
+
+void handleLine(char *s) {
+  if (strncmp(s, "STATUS", 6) == 0) {
+    statusOn = (atol(s + 6) != 0);
+    return;
+  }
+
+  if (strncmp(s, "HOME", 4) == 0) {
+    char *axis = s + 4;
+    while (*axis == ' ' || *axis == '\t') axis++;
+    if (strncmp(axis, "X", 1) == 0 || *axis == '\0') {
+      startXHoming();
+    }
+    return;
+  }
+
+  if (strncmp(s, "STOP", 4) == 0) {
+    stopAll();
+    xHoming = false;
+    return;
+  }
+
+  // Only ignore motion while X is actively homing.
+  // After READY is printed, both axes are allowed to move independently.
+  if (xHoming) return;
+
+  if (strncmp(s, "MOVE", 4) == 0) {
+    char *rest = s + 4;
+    while (*rest == ' ' || *rest == '\t') rest++;
+    if (strncmp(rest, "X", 1) == 0) {
+      rest += 1;
+      while (*rest == ' ' || *rest == '\t') rest++;
+      moveX(atol(rest));
+      return;
+    }
+    if (strncmp(rest, "Y", 1) == 0) {
+      rest += 1;
+      while (*rest == ' ' || *rest == '\t') rest++;
+      moveY(atol(rest));
+      return;
+    }
+  }
+
+  if (s[0] == 'G') {
+    moveX(atol(s + 1) - xAxis.absoluteSteps);
+    return;
+  }
+
+  long s1 = 0, s2 = 0;
+  char *token = strtok(s, " ,\t");
+  if (token != NULL) {
+    s1 = atol(token);
+    token = strtok(NULL, " ,\t");
+    if (token != NULL) s2 = atol(token);
+  }
+
+  // Legacy behavior: two numbers = X,Y move pair.
+  // This matches the old Python code exactly.
+  moveX(s1);
+  moveY(s2);
+}
+
+void moveX(long delta) {
+  if (!xHomed) {
+    xAxis.stepsRemaining = 0;
+    return;
+  }
+
+  long target = constrain(xAxis.absoluteSteps + delta, 0L, MAX_X_POS);
+  delta = target - xAxis.absoluteSteps;
+  if (delta == 0) {
+    xAxis.stepsRemaining = 0;
+    return;
+  }
+
+  setAxisDirection(xAxis, X_DIR_PIN, delta);
+  xAxis.stepsRemaining = labs(delta);
+}
+
+void moveY(long delta) {
+  if (delta == 0) {
+    yAxis.stepsRemaining = 0;
+    return;
+  }
+
+  setAxisDirection(yAxis, Y_DIR_PIN, delta);
+  yAxis.stepsRemaining = labs(delta);
+}
+
+void readSerialNonBlocking() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      lineBuf[lineLen] = '\0';
+      if (lineLen > 0) {
+        handleLine(lineBuf);
+      }
+      lineLen = 0;
+      continue;
+    }
+    if (c == '\r') continue;
+    if (lineLen < sizeof(lineBuf) - 1) {
+      lineBuf[lineLen++] = c;
+    } else {
+      lineLen = 0;
+    }
+  }
+}
+
+void stepAxis(AxisState &axis, uint8_t stepPin, uint8_t dirPin) {
+  if (axis.stepsRemaining <= 0) return;
+
+  if (&axis == &xAxis) {
+    if ((axis.currentDir < 0 && xLimitPressed()) || (axis.currentDir > 0 && xAxis.absoluteSteps >= MAX_X_POS)) {
+      if (axis.currentDir < 0) xAxis.absoluteSteps = 0;
+      axis.stepsRemaining = 0;
+      axis.stepPinHigh = false;
+      digitalWrite(stepPin, LOW);
+      return;
+    }
+  }
+
+  unsigned long now = micros();
+  if (now - axis.lastStepMicros < STEP_INTERVAL_US) return;
+
+  axis.lastStepMicros = now;
+  axis.stepPinHigh = !axis.stepPinHigh;
+  digitalWrite(stepPin, axis.stepPinHigh ? HIGH : LOW);
+
+  if (!axis.stepPinHigh) {
+    axis.stepsRemaining--;
+    axis.absoluteSteps += axis.currentDir;
+  }
+}
+
+// Convenience helper for future use:
+// This lets the host explicitly request a Y sweep while keeping X fixed.
+// Example: "MOVE Y 100" sweeps Y by 100 steps.
+// The app can also send a full pair: "10 50" for X=10, Y=50.
+
+

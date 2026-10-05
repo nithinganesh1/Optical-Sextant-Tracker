@@ -1,0 +1,4 @@
+port: /dev/ttyUSB0
+output: .build
+board: arduino:avr:uno
+sketch: firmware/firmware.ino

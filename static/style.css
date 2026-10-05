@@ -1,0 +1,17 @@
+:root { color-scheme: dark; }
+body { margin: 0; background: #0e1014; color: #d8dde6; font: 15px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+main { max-width: 440px; margin: 0 auto; padding: 28px 20px 48px; }
+h1 { font-size: 18px; letter-spacing: .2em; margin: 0 0 8px; padding-bottom: 12px; border-bottom: 1px solid #262b35; }
+h2 { font-size: 12px; letter-spacing: .15em; color: #7d8696; margin: 22px 0 4px; text-transform: uppercase; }
+.row { display: flex; justify-content: space-between; padding: 3px 0; }
+.row span { color: #9aa3b2; }
+.camera-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 18px; }
+.camera-panel { background: #121821; border: 1px solid #2a3140; border-radius: 8px; padding: 10px; }
+.camera-panel h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #b2bccd; }
+.camera-panel img { display: block; width: 100%; border-radius: 6px; background: #000; min-height: 160px; object-fit: cover; }
+.btns { display: flex; flex-direction: column; gap: 10px; margin-top: 32px; }
+button { background: #181c24; color: #d8dde6; border: 1px solid #323946; padding: 12px; font: inherit; letter-spacing: .1em; cursor: pointer; border-radius: 4px; }
+button:hover { background: #212733; }
+button.stop { border-color: #7a2f2f; color: #ff8a8a; }
+button.stop:hover { background: #2a1717; }
+#msg { color: #ff8a8a; min-height: 1.5em; }

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sun Tracker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <h1>SUN TRACKER</h1>
+
+  <h2>Motor</h2>
+  <div class="row"><span>Current Steps</span><b id="steps">–</b></div>
+  <div class="row"><span>Mirror Angle</span><b id="mirror_angle">–</b></div>
+  <div class="row"><span>Sun Angle</span><b id="sun_angle">–</b></div>
+
+  <h2>Status</h2>
+  <div class="row"><span>Tracking</span><b id="tracking">–</b></div>
+  <div class="row"><span>Limit Switch</span><b id="limit_switch">–</b></div>
+  <div class="row"><span>State</span><b id="status">–</b></div>
+
+  <div class="camera-grid">
+    <div class="camera-panel">
+      <h3>Camera 1</h3>
+      <img src="/video_feed/cam1" alt="Camera 1 live feed">
+    </div>
+    <div class="camera-panel">
+      <h3>Camera 2</h3>
+      <img src="/video_feed/cam2" alt="Camera 2 live feed">
+    </div>
+  </div>
+
+  <div class="btns">
+    <button onclick="post('home')">HOME</button>
+    <button class="stop" onclick="post('stop')">STOP TRACKING</button>
+  </div>
+  <p id="msg"></p>
+</main>
+
+<script>
+const fmt = (v, u) => v === null || v === undefined ? "–" :
+  (typeof v === "number" && u ? v.toFixed(2) + u : v);
+
+async function refresh() {
+  try {
+    const d = await (await fetch("/api/status")).json();
+    for (const k in d) {
+      const el = document.getElementById(k);
+      if (!el) continue;
+      let v = d[k];
+      if (k === "tracking") v = v ? "RUNNING" : "STOPPED";
+      else if (k === "limit_switch") v = v === null ? null : (v ? "PRESSED" : "RELEASED");
+      else if (k === "sun_angle" || k === "mirror_angle") v = v === null ? null : `${v.toFixed(2)}°`;
+      el.textContent = fmt(v, el.dataset.u);
+    }
+  } catch (e) { document.getElementById("status").textContent = "SERVER UNREACHABLE"; }
+}
+
+async function post(name) {
+  const r = await fetch("/api/" + name, {method: "POST"});
+  const d = await r.json().catch(() => ({}));
+  document.getElementById("msg").textContent = d.ok ? "" : (d.error || "failed");
+  refresh();
+}
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

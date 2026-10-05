@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sun Tracker</title>
+<style>
+  :root{
+    --bg:#0a0d13; --panel:#0f141c; --line:#1d2533; --text:#cbd5e1; --dim:#64748b;
+    --sun:#f59e0b; --ray:#f43f5e; --horizon:#38bdf8; --ok:#34d399; --bad:#fb7185; --brass:#a17028;
+    --mono:ui-monospace,"JetBrains Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans)}
+  header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:12px 24px;border-bottom:1px solid var(--line)}
+  header h1{margin:0;font:600 15px var(--mono);letter-spacing:.08em;color:#f1f5f9}
+  .hdr{display:flex;gap:22px;font:12px var(--mono);color:var(--dim)}
+  .hdr b{color:#f1f5f9;font-weight:600}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:8px}
+  .dot.off{background:var(--bad)}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:16px 24px;max-width:1500px;margin:auto}
+  @media(max-width:1000px){main{grid-template-columns:1fr;padding:12px}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+  .card > h2{margin:0;padding:10px 16px;border-bottom:1px solid var(--line);font:500 12px var(--mono);
+    color:var(--dim);display:flex;justify-content:space-between}
+  svg{display:block;width:100%;height:auto}
+  .cams{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+  @media(max-width:640px){.cams{grid-template-columns:1fr}}
+  .cam{position:relative;aspect-ratio:4/3;background:#06080c;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .cam img{width:100%;height:100%;object-fit:cover;display:block}
+  .cam .tag{position:absolute;left:8px;top:8px;padding:2px 8px;border-radius:4px;
+    background:rgba(6,8,12,.75);font:11px var(--mono);color:#e2e8f0}
+  .cam .none{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    font:12px var(--mono);color:var(--dim);text-align:center;padding:12px}
+  .cam.fail img{visibility:hidden} .cam.fail .none{display:flex}
+  .row{display:flex;justify-content:space-between;padding:7px 16px;font:13px var(--mono)}
+  .row span{color:var(--dim)} .row b{color:#f1f5f9;font-weight:600}
+  .row.sep{border-top:1px solid var(--line);margin-top:4px;padding-top:11px}
+  .side{display:flex;flex-direction:column;gap:16px}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 16px}
+  button{font:500 13px var(--mono);padding:10px;border-radius:6px;cursor:pointer;color:var(--text);
+    background:#131a26;border:1px solid #243049}
+  button:hover{background:#1a2333}
+  button:focus-visible{outline:2px solid var(--horizon);outline-offset:2px}
+  button.stop{color:#fda4af;background:#271518;border-color:#482027}
+  #msg{min-height:20px;padding:0 16px 12px;font:12px var(--mono);color:var(--dim);text-align:center}
+  .badge{font:11px var(--mono);padding:2px 8px;border-radius:4px;border:1px solid}
+  .badge.ok{color:var(--ok);border-color:#1f5a44;background:#0f2a21}
+  .badge.warn{color:var(--sun);border-color:#5a4313;background:#2a2010}
+  .flow{stroke-dasharray:6 5;animation:flow 1.4s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-22}}
+  @media(prefers-reduced-motion:reduce){.flow{animation:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SUN TRACKER</h1>
+  <div class="hdr">
+    <span><i class="dot" id="dot"></i><b id="h_track">–</b></span>
+    <span>SUN <b id="h_sun">–</b></span>
+    <span>MIRROR <b id="h_mir">–</b></span>
+    <span>LIMIT <b id="h_lim">–</b></span>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2><span>Optical path: sun → mirror B → mirror A (60°) → telescope C</span><span id="coin" class="badge warn">–</span></h2>
+
+    <svg id="svg" viewBox="0 0 860 500" role="img" aria-label="Sextant optical path driven by live sun and mirror angles">
+      <defs>
+        <radialGradient id="glow"><stop offset="0" stop-color="#fef08a"/><stop offset=".45" stop-color="#f59e0b" stop-opacity=".8"/><stop offset="1" stop-color="#f59e0b" stop-opacity="0"/></radialGradient>
+        <clipPath id="eyeclip"><circle r="44"/></clipPath>
+      </defs>
+
+      <!-- horizon reference + horizon beam -->
+      <text x="22" y="404" fill="#ca8a04" font-family="monospace" font-size="10">HORIZON</text>
+      <line x1="20" y1="422" x2="300" y2="422" stroke="var(--horizon)" stroke-width="1.5" class="flow"/>
+
+      <!-- sextant limb -->
+      <path id="limb" fill="none" stroke="#2a2318" stroke-width="20" stroke-linecap="round"/>
+      <g id="ticks" font-family="monospace" font-size="9" fill="#a17028"></g>
+
+      <!-- index arm -->
+      <line id="arm" stroke="#334155" stroke-width="4" stroke-linecap="round"/>
+      <circle id="armTip" r="5" fill="#0f141c" stroke="#e2e8f0" stroke-width="1.5"/>
+
+      <!-- angle alpha helper -->
+      <line id="hline" stroke="#475569" stroke-dasharray="3 3"/>
+      <text id="alphaTxt" fill="#94a3b8" font-family="monospace" font-size="11"/>
+
+      <!-- rays -->
+      <line id="r1" stroke="var(--ray)" stroke-width="1.75" class="flow"/>
+      <line id="r2" stroke="var(--ray)" stroke-width="1.75" class="flow"/>
+      <line id="r3" stroke="var(--ray)" stroke-width="1.75" class="flow"/>
+      <line id="r4" stroke="var(--horizon)" stroke-width="1.5" class="flow"/>
+
+      <!-- sun -->
+      <g id="sun">
+        <circle id="sunGlow" r="34" fill="url(#glow)"/>
+        <circle id="sunCore" r="13" fill="#fff" stroke="#fbbf24" stroke-width="2"/>
+        <text id="sunLbl" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="10">SUN</text>
+      </g>
+
+      <!-- mirror B -->
+      <circle id="bPivot" r="16" fill="#111827" stroke="#334155" stroke-width="1.5"/>
+      <line id="mirB" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/>
+      <text id="bLbl" fill="#e2e8f0" font-size="14" font-weight="600">B</text>
+      <text id="thetaTxt" fill="#94a3b8" font-family="monospace" font-size="11"/>
+
+      <!-- mirror A (fixed 60°) -->
+      <circle id="aPivot" r="14" fill="#111827" stroke="#334155" stroke-width="1.5"/>
+      <line id="mirA1" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/>
+      <line id="mirA2" stroke="var(--horizon)" stroke-width="4" stroke-dasharray="3 3" opacity=".6"/>
+      <text id="aLbl" fill="#e2e8f0" font-size="14" font-weight="600">A</text>
+
+      <!-- telescope -->
+      <g transform="translate(470,410)">
+        <rect width="100" height="24" rx="3" fill="#131c2b" stroke="#334155" stroke-width="1.25"/>
+        <line x1="0" y1="2" x2="0" y2="22" stroke="var(--horizon)" stroke-width="1.5"/>
+        <text x="30" y="42" fill="#64748b" font-family="monospace" font-size="9">TELESCOPE C</text>
+      </g>
+
+      <!-- eyepiece split view -->
+      <g transform="translate(740,422)">
+        <circle r="48" fill="#090d16" stroke="#4a3717" stroke-width="3"/>
+        <g clip-path="url(#eyeclip)">
+          <rect x="-48" y="0" width="48" height="48" fill="#451a03" fill-opacity=".5"/>
+          <line x1="-48" y1="0" x2="0" y2="0" stroke="#fef08a" stroke-width="1.5"/>
+          <rect x="0" y="-48" width="48" height="96" fill="#991b1b" fill-opacity=".2"/>
+          <circle id="eyeSun" cx="8" cy="0" r="17" fill="#fff" stroke="#f59e0b" stroke-width="1.5"/>
+          <line x1="0" y1="-48" x2="0" y2="48" stroke="#1e293b" stroke-width="1.5"/>
+          <line x1="-8" y1="0" x2="8" y2="0" stroke="var(--ray)" stroke-width=".75"/>
+          <line x1="0" y1="-8" x2="0" y2="8" stroke="var(--ray)" stroke-width=".75"/>
+        </g>
+        <text x="-30" y="66" fill="#64748b" font-family="monospace" font-size="9">SPLIT VIEW</text>
+      </g>
+    </svg>
+
+    <div class="cams">
+      <div class="cam" id="camBox1">
+        <img src="/video_feed/cam1" alt="Camera 1 live feed">
+        <span class="tag">CAM 1 · SKY</span>
+        <div class="none">Camera 1 offline<br>retrying…</div>
+      </div>
+      <div class="cam" id="camBox2">
+        <img src="/video_feed/cam2" alt="Camera 2 live feed">
+        <span class="tag">CAM 2 · RETICLE</span>
+        <div class="none">Camera 2 offline<br>retrying…</div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <section class="card">
+      <h2><span>Motor</span></h2>
+      <div class="row"><span>Current steps</span><b id="steps">–</b></div>
+      <div class="row"><span>Mirror angle (θ)</span><b id="mirror_angle">–</b></div>
+      <div class="row"><span>Sun angle (α)</span><b id="sun_angle">–</b></div>
+      <div class="row"><span>Mirror A (fixed)</span><b>60.00°</b></div>
+      <div class="row"><span>Error (α − 2θ)</span><b id="err">–</b></div>
+      <h2 style="border-top:1px solid var(--line);margin-top:8px"><span>Status</span></h2>
+      <div class="row"><span>Tracking</span><b id="tracking">–</b></div>
+      <div class="row"><span>Limit switch</span><b id="limit_switch">–</b></div>
+      <div class="row"><span>State</span><b id="status">–</b></div>
+      <div class="row"><span>Base · Cam 1</span><b id="ax_base">–</b></div>
+      <div class="row"><span>Y · Cam 2</span><b id="ax_y">–</b></div>
+      <div class="row"><span>Y steps</span><b id="y_steps">–</b></div>
+      <div class="btns">
+        <button onclick="post('home')">HOME</button>
+        <button onclick="post('start')">START</button>
+        <button class="stop" onclick="post('stop')">STOP TRACKING</button>
+      </div>
+      <div class="btns">
+        <button onclick="post('camera/cam1/restart')">RESTART CAM 1</button>
+        <button onclick="post('camera/cam2/restart')">RESTART CAM 2</button>
+      </div>
+      <div id="msg"></div>
+    </section>
+
+    <section class="card">
+      <h2><span>Tuning (saved automatically)</span></h2>
+      <div id="tune" style="display:grid;gap:6px;font-size:12px"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+/* ---------- geometry (SVG, y down) ----------
+   Sextant rule: sun altitude alpha = 2 * theta (mirror B angle).
+   Mirror A is fixed; mirror B line angle = 120° - theta (math angles).
+   The B->A ray direction therefore stays constant, and the A->C ray is horizontal. */
+const A = {x:300, y:422}, B = {x:420, y:214};
+const SUN_DIST = 190, ARM_LEN = 290, A_ANGLE = 120;
+const rad = d => d * Math.PI / 180;
+const $ = id => document.getElementById(id);
+const set = (id, o) => { const e = $(id); for (const k in o) e.setAttribute(k, o[k]); };
+const pol = (c, r, deg) => ({x: c.x + r * Math.cos(rad(deg)), y: c.y - r * Math.sin(rad(deg))});
+const armDeg = theta => -10 - theta;           // index arm direction (math degrees)
+
+/* limb + ticks: reading shown = alpha = 2*theta, 0..90 */
+(function buildLimb(){
+  const p0 = pol(B, ARM_LEN, armDeg(0)), p1 = pol(B, ARM_LEN, armDeg(45));
+  set("limb", {d: `M ${p0.x} ${p0.y} A ${ARM_LEN} ${ARM_LEN} 0 0 1 ${p1.x} ${p1.y}`});
+  const g = $("ticks");
+  for (let a = 0; a <= 90; a += 5) {
+    const ang = armDeg(a / 2), major = a % 10 === 0;
+    const i = pol(B, ARM_LEN - 3, ang), o = pol(B, ARM_LEN + (major ? 9 : 5), ang);
+    const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    l.setAttribute("x1", i.x); l.setAttribute("y1", i.y); l.setAttribute("x2", o.x); l.setAttribute("y2", o.y);
+    l.setAttribute("stroke", major ? "#a17028" : "#5a3d16"); g.appendChild(l);
+    if (major) {
+      const t = pol(B, ARM_LEN + 22, ang);
+      const x = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      x.setAttribute("x", t.x); x.setAttribute("y", t.y + 3); x.setAttribute("text-anchor", "middle");
+      x.textContent = a; g.appendChild(x);
+    }
+  }
+})();
+
+/* static parts */
+set("aPivot", {cx:A.x, cy:A.y}); set("bPivot", {cx:B.x, cy:B.y});
+(function(){
+  const d = {x: Math.cos(rad(A_ANGLE)), y: -Math.sin(rad(A_ANGLE))};
+  set("mirA1", {x1:A.x, y1:A.y, x2:A.x + 28*d.x, y2:A.y + 28*d.y});   // silvered half
+  set("mirA2", {x1:A.x, y1:A.y, x2:A.x - 28*d.x, y2:A.y - 28*d.y});   // clear half
+  set("aLbl", {x:A.x - 34, y:A.y + 28});
+  set("bLbl", {x:B.x + 20, y:B.y - 18});
+  set("hline", {x1:B.x - 110, y1:B.y, x2:B.x, y2:B.y});
+  set("r2", {x1:B.x, y1:B.y, x2:A.x, y2:A.y});
+  set("r3", {x1:A.x, y1:A.y - 2, x2:470, y2:A.y - 2});
+  set("r4", {x1:A.x, y1:A.y + 2, x2:470, y2:A.y + 2});
+})();
+
+/* ---------- draw optics from live angles ---------- */
+function drawOptics(sun, theta) {
+  const a = rad(sun);
+  const sx = B.x - SUN_DIST * Math.cos(a), sy = B.y - SUN_DIST * Math.sin(a);
+  set("sunGlow", {cx:sx, cy:sy}); set("sunCore", {cx:sx, cy:sy});
+  set("sunLbl", {x:sx, y:sy - 24});
+  set("r1", {x1:sx, y1:sy, x2:B.x, y2:B.y});
+
+  const m = rad(A_ANGLE - theta), h = {x: Math.cos(m) * 34, y: -Math.sin(m) * 34};
+  set("mirB", {x1:B.x - h.x, y1:B.y - h.y, x2:B.x + h.x, y2:B.y + h.y});
+
+  const tip = pol(B, ARM_LEN, armDeg(theta));
+  set("arm", {x1:B.x, y1:B.y, x2:tip.x, y2:tip.y}); set("armTip", {cx:tip.x, cy:tip.y});
+
+  $("alphaTxt").textContent = `α ${sun.toFixed(1)}°`;  set("alphaTxt", {x:B.x - 108, y:B.y - 6});
+  $("thetaTxt").textContent = `θ ${theta.toFixed(1)}°`; set("thetaTxt", {x:B.x + 20, y:B.y + 34});
+
+  const err = sun - 2 * theta;
+  set("eyeSun", {cy: Math.max(-30, Math.min(30, -err * 6))});
+  const ok = Math.abs(err) < 0.3, c = $("coin");
+  c.textContent = ok ? "COINCIDENT" : `Δ ${err > 0 ? "+" : ""}${err.toFixed(2)}°`;
+  c.className = "badge " + (ok ? "ok" : "warn");
+  $("err").textContent = `${err > 0 ? "+" : ""}${err.toFixed(2)}°`;
+}
+
+/* ---------- live data ---------- */
+const S = {sun:41, theta:20.5, tracking:null, demo:false};
+const V = {sun:41, theta:20.5};                         // smoothed values on screen
+const deg = v => (typeof v === "number" ? v.toFixed(2) + "°" : "–");
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status");
+    const d = await r.json();
+    S.demo = false;
+    if (typeof d.sun_angle === "number") S.sun = d.sun_angle;
+    if (typeof d.mirror_angle === "number") S.theta = d.mirror_angle;
+    S.tracking = d.tracking;
+    $("steps").textContent = d.steps ?? "–";
+    $("mirror_angle").textContent = deg(d.mirror_angle);
+    $("sun_angle").textContent = deg(d.sun_angle);
+    $("tracking").textContent = d.tracking ? "RUNNING" : "STOPPED";
+    $("limit_switch").textContent = d.limit_switch === null || d.limit_switch === undefined ? "–" : (d.limit_switch ? "PRESSED" : "RELEASED");
+    $("status").textContent = d.status ?? "–";
+    const axTxt = a => a ? `${a.state}${a.sun ? " · sun" : " · no sun"}${a.err !== null && a.err !== undefined ? " · err " + a.err + "px" : ""}${a.cam !== "ok" ? " · cam " + a.cam : ""}` : "–";
+    $("ax_base").textContent = axTxt(d.base);
+    $("ax_y").textContent = axTxt(d.yaxis);
+    $("y_steps").textContent = d.y_steps ?? "–";
+    $("h_lim").textContent = d.limit_switch ? "PRESSED" : "OK";
+    $("dot").className = "dot" + (d.tracking ? "" : " off");
+  } catch (e) {
+    S.demo = true;                                      // server unreachable: show a demo orbit
+    $("status").textContent = "SERVER UNREACHABLE (demo)";
+    $("dot").className = "dot off";
+  }
+  $("h_track").textContent = S.demo ? "DEMO" : (S.tracking ? "TRACKING" : "STANDBY");
+}
+
+async function post(name) {
+  $("msg").textContent = name + "…";
+  try {
+    const r = await fetch("/api/" + name, {method:"POST"});
+    const d = await r.json().catch(() => ({}));
+    $("msg").textContent = d.ok ? (d.queued ? "HOME queued - runs when the controller is ready" : "OK: " + name) : (d.error || "failed");
+  } catch (e) { $("msg").textContent = "server unreachable"; }
+  refresh();
+}
+
+let t0 = 0;
+function frame() {
+  if (S.demo) { t0 += 0.006; S.sun = 40 + Math.sin(t0) * 22; S.theta = S.sun / 2; $("sun_angle").textContent = deg(S.sun); $("mirror_angle").textContent = deg(S.theta); }
+  V.sun += (S.sun - V.sun) * 0.2;                       // ease toward the real value
+  V.theta += (S.theta - V.theta) * 0.2;
+  drawOptics(V.sun, V.theta);
+  $("h_sun").textContent = deg(V.sun); $("h_mir").textContent = deg(V.theta);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- camera feeds: retry if a stream drops ---------- */
+function watchCam(boxId, url) {
+  const box = $(boxId), img = box.querySelector("img");
+  img.onerror = () => { box.classList.add("fail"); setTimeout(() => { img.src = url + "?t=" + Date.now(); }, 3000); };
+  img.onload = () => { box.classList.remove("fail"); box._ok = Date.now(); };
+  box._ok = Date.now();
+  setInterval(() => {                       // MJPEG fires onload per frame in most browsers; if it goes quiet, reconnect
+    if (Date.now() - box._ok > 6000) { box._ok = Date.now(); img.src = url + "?t=" + Date.now(); }
+  }, 2000);
+}
+watchCam("camBox1", "/video_feed/cam1");
+watchCam("camBox2", "/video_feed/cam2");
+
+/* ---------- tuning panel ---------- */
+async function loadTune() {
+  try {
+    const d = await (await fetch("/api/tune")).json();
+    const box = $("tune"); box.innerHTML = "";
+    d.params.forEach(p => {
+      const row = document.createElement("label");
+      row.style.cssText = "display:flex;justify-content:space-between;gap:8px;align-items:center";
+      row.innerHTML = `<span>${p.label}</span>`;
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.value = p.value; inp.min = p.min; inp.max = p.max;
+      inp.step = p.key.endsWith("_sign") ? 2 : p.step; inp.style.cssText = "width:78px";
+      inp.onchange = async () => {
+        await fetch("/api/tune", {method:"POST", headers:{"Content-Type":"application/json"},
+                                  body: JSON.stringify({[p.key]: parseFloat(inp.value)})});
+        loadTune();
+      };
+      row.appendChild(inp); box.appendChild(row);
+    });
+  } catch (e) { setTimeout(loadTune, 2000); }
+}
+loadTune();
+
+refresh();
+setInterval(refresh, 500);
+frame();
+</script>
+</body>
+</html>
