@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sun Tracker Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+
+<body>
+
+  <header class="top">
+    <div class="brand"><span class="dot" id="streamDot"></span><b>SUN TRACKER</b><span
+        class="muted hide-s">double-reflection sextant · live · ESP32</span></div>
+    <div class="top-stats">
+      <span>STREAM <b id="streamState">CONNECTING</b></span>
+      <span>ESP32 <b data-k="link.state" data-tone="state"></b></span>
+      <span class="hide-s">LOOP <b data-k="loop_hz" data-f="hz"></b></span>
+      <span class="hide-s">UP <b data-k="uptime_s" data-f="uptime"></b></span>
+      <span>READING <b data-k="sextant.reading_deg" data-f="deg2"></b></span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="col-main">
+
+      <!-- ===================== sextant optics ===================== -->
+      <div class="card">
+        <div class="card-h">
+          <span>Z-ray optical path</span>
+          <span class="muted hide-s">Sun → index mirror B (θ, motor X) → horizon mirror A (60°) → telescope C</span>
+          <span class="badge" id="coinBadge">—</span>
+        </div>
+        <div class="svg-wrap">
+          <svg id="optics" viewBox="-20 -40 1000 620" preserveAspectRatio="xMidYMid meet" role="img"
+            aria-label="Sextant optical path driven by live motor X angle">
+            <defs>
+              <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#475569" />
+                <stop offset=".5" stop-color="#94a3b8" />
+                <stop offset="1" stop-color="#334155" />
+              </linearGradient>
+              <radialGradient id="sunGlow" cx=".5" cy=".5" r=".5">
+                <stop offset="0" stop-color="#fef08a" />
+                <stop offset=".4" stop-color="#f59e0b" stop-opacity=".85" />
+                <stop offset="1" stop-color="#d97706" stop-opacity="0" />
+              </radialGradient>
+              <clipPath id="eyeClip">
+                <circle cx="0" cy="0" r="52" />
+              </clipPath>
+            </defs>
+
+            <!-- horizon reference + horizon beam -->
+            <text id="horizonLabel" class="svg-label amber" x="24" y="0">HORIZON</text>
+            <line id="horizonBeam" class="ray blue" x1="20" y1="0" x2="700" y2="0" />
+
+            <!-- sextant limb (built by script) -->
+            <g id="limb"></g>
+            <line id="indexArmBar" class="arm" x1="0" y1="0" x2="0" y2="0" />
+            <line id="indexArmHi" class="arm-hi" x1="0" y1="0" x2="0" y2="0" />
+            <circle id="armDot" r="5" class="arm-dot" cx="0" cy="0" />
+            <text id="armLabel" class="svg-label" text-anchor="middle" x="0" y="0"></text>
+
+            <!-- theta reference (parallel to A) and arc -->
+            <line id="parallelRef" class="dash" x1="0" y1="0" x2="0" y2="0" />
+            <path id="thetaArc" class="theta-arc" d="" />
+            <text id="thetaLabel" class="svg-label" x="0" y="0">θ</text>
+
+            <!-- rays -->
+            <line id="raySun" class="ray red" x1="0" y1="0" x2="0" y2="0" />
+            <line id="rayBA" class="ray red" x1="0" y1="0" x2="0" y2="0" />
+            <line id="rayOut" class="ray red" x1="0" y1="0" x2="0" y2="0" />
+            <polygon id="arrSun" class="arrow red" points="" />
+            <polygon id="arrBA" class="arrow red" points="" />
+            <polygon id="arrOut" class="arrow red" points="" />
+            <polygon id="arrHor" class="arrow blue" points="" />
+
+            <!-- sun -->
+            <g id="sunGroup">
+              <circle id="sunGlowC" r="34" fill="url(#sunGlow)" cx="0" cy="0" />
+              <circle id="sunCore" r="14" class="sun-core" cx="0" cy="0" />
+              <text id="sunLabel" class="svg-label" text-anchor="middle" x="0" y="0">SUN</text>
+            </g>
+
+            <!-- mirror B -->
+            <g id="mirrorBg">
+              <circle id="pivotB" r="14" class="pivot" cx="0" cy="0" />
+              <line id="mirrorB" class="mirror" x1="0" y1="0" x2="0" y2="0" />
+              <line id="mirrorBhi" class="mirror-hi" x1="0" y1="0" x2="0" y2="0" />
+              <text id="labelB" class="svg-label strong" x="0" y="0">B</text>
+              <text id="labelBsub" class="svg-label" x="0" y="0">INDEX</text>
+            </g>
+            <!-- mirror A -->
+            <g id="mirrorAg">
+              <circle id="pivotA" r="13" class="pivot" cx="0" cy="0" />
+              <line id="mirrorA" class="mirror" x1="0" y1="0" x2="0" y2="0" />
+              <line id="mirrorAclear" class="mirror-clear" x1="0" y1="0" x2="0" y2="0" />
+              <text id="labelA" class="svg-label strong" x="0" y="0">A</text>
+              <text id="labelAsub" class="svg-label" x="0" y="0">HORIZON 60°</text>
+            </g>
+
+            <!-- telescope + eyepiece -->
+            <rect id="scope" class="scope" x="0" y="0" width="0" height="0" rx="3" />
+            <text id="scopeLabel" class="svg-label" x="0" y="0">TELESCOPE</text>
+            <g id="eyepiece" transform="translate(0,0)">
+              <circle r="56" class="bezel" />
+              <g clip-path="url(#eyeClip)">
+                <path d="M0,-56 A56,56 0 0,0 0,56 Z" class="eye-sky" />
+                <rect x="-56" y="0" width="56" height="56" class="eye-sea" />
+                <line x1="-56" y1="0" x2="0" y2="0" class="eye-horizon" />
+                <path d="M0,-56 A56,56 0 0,1 0,56 Z" class="eye-right" />
+                <circle id="eyeSun" cx="8" cy="0" r="18" class="eye-sun" />
+                <line x1="0" y1="-56" x2="0" y2="56" class="eye-divider" />
+                <line x1="-8" y1="0" x2="8" y2="0" class="eye-cross" />
+                <line x1="0" y1="-8" x2="0" y2="8" class="eye-cross" />
+              </g>
+              <text class="svg-label strong" x="64" y="4">C</text>
+              <text class="svg-label" x="-40" y="76">SPLIT VIEW</text>
+              <text id="eyeNote" class="svg-label amber" text-anchor="middle" x="0" y="92"></text>
+            </g>
+          </svg>
+        </div>
+        <div class="readouts">
+          <div><span>Motor X angle</span><b data-k="motor_x.angle_deg" data-f="deg2"></b></div>
+          <div><span>Index mirror θ</span><b data-k="sextant.theta_deg" data-f="deg2"></b></div>
+          <div><span>Sextant reading</span><b data-k="sextant.reading_deg" data-f="deg2" class="hot"></b></div>
+          <div><span>Sun altitude</span><b data-k="sextant.sun_altitude_deg" data-f="deg2"></b></div>
+          <div><span>Zenith distance</span><b data-k="sextant.zenith_distance_deg" data-f="deg2"></b></div>
+          <div><span>Residual (cam)</span><b data-k="sextant.residual_deg" data-f="sdeg2"></b></div>
+        </div>
+      </div>
+
+      <!-- ===================== cameras ===================== -->
+      <div class="cams">
+        <div class="card">
+          <div class="card-h"><span>Camera 1 · X axis</span><span class="badge" data-k="camera1.detected" data-f="sun"
+              data-tone="bool-good"></span></div>
+          <img class="video" src="/video/cam1" alt="Camera 1 live video">
+          <dl class="kv">
+            <div>
+              <dt>Sun position</dt>
+              <dd data-k="camera1.center" data-f="pt"></dd>
+            </div>
+            <div>
+              <dt>Error x / y</dt>
+              <dd><span data-k="camera1.error_x_px" data-f="px"></span> / <span data-k="camera1.error_y_px"
+                  data-f="px"></span></dd>
+            </div>
+            <div>
+              <dt>Centred (±<span data-k="camera1.allowed_error_px" data-f="int"></span> px)</dt>
+              <dd data-k="camera1.centred" data-f="yesno" data-tone="bool-good"></dd>
+            </div>
+            <div>
+              <dt>Radius</dt>
+              <dd data-k="camera1.radius_px" data-f="f1"></dd>
+            </div>
+            <div>
+              <dt>Confidence</dt>
+              <dd data-k="camera1.confidence" data-f="f2"></dd>
+            </div>
+            <div>
+              <dt>Brightness</dt>
+              <dd data-k="camera1.brightness" data-f="int"></dd>
+            </div>
+            <div>
+              <dt>Rectangle</dt>
+              <dd data-k="camera1.roi" data-f="list"></dd>
+            </div>
+            <div>
+              <dt>Target point</dt>
+              <dd data-k="camera1.target" data-f="pt"></dd>
+            </div>
+          </dl>
+        </div>
+        <div class="card">
+          <div class="card-h"><span>Camera 2 · Y axis</span><span class="badge" data-k="camera2.detected" data-f="sun"
+              data-tone="bool-good"></span></div>
+          <img class="video" src="/video/cam2" alt="Camera 2 live video">
+          <dl class="kv">
+            <div>
+              <dt>Sun position</dt>
+              <dd data-k="camera2.center" data-f="pt"></dd>
+            </div>
+            <div>
+              <dt>Distance to line</dt>
+              <dd data-k="camera2.distance_px" data-f="px"></dd>
+            </div>
+            <div>
+              <dt>On line (±<span data-k="camera2.allowed_error_px" data-f="int"></span> px)</dt>
+              <dd data-k="camera2.on_line" data-f="yesno" data-tone="bool-good"></dd>
+            </div>
+            <div>
+              <dt>Radius</dt>
+              <dd data-k="camera2.radius_px" data-f="f1"></dd>
+            </div>
+            <div>
+              <dt>Confidence</dt>
+              <dd data-k="camera2.confidence" data-f="f2"></dd>
+            </div>
+            <div>
+              <dt>Brightness</dt>
+              <dd data-k="camera2.brightness" data-f="int"></dd>
+            </div>
+            <div>
+              <dt>Reference line</dt>
+              <dd data-k="camera2.line" data-f="list"></dd>
+            </div>
+            <div>
+              <dt>Camera</dt>
+              <dd data-k="camera2.online" data-f="online" data-tone="bool-good"></dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col-side">
+
+      <div class="card">
+        <div class="card-h"><span>Motor X</span><span class="muted">Camera 1 · mirror B</span></div>
+        <div class="gauge" data-gauge="motor_x.angle_deg" data-min="-60" data-min-k="motor_x.switch_deg" data-max="60">
+          <div class="track">
+            <div class="tick" style="left:60%"></div>
+            <div class="tick strong" style="left:100%"></div>
+            <div class="marker"></div>
+          </div>
+          <div class="gauge-l"><span>−60° switch</span><span>15° scan start</span><span>60° surface</span></div>
+        </div>
+        <dl class="kv">
+          <div>
+            <dt>Angle</dt>
+            <dd data-k="motor_x.angle_deg" data-f="deg2"></dd>
+          </div>
+          <div>
+            <dt>Steps from switch</dt>
+            <dd data-k="motor_x.steps" data-f="int"></dd>
+          </div>
+          <div>
+            <dt>Soft limit (steps)</dt>
+            <dd><span data-k="motor_x.min_steps" data-f="int"></span> … <span data-k="motor_x.max_steps"
+                data-f="int"></span></dd>
+          </div>
+          <div>
+            <dt>Home switch</dt>
+            <dd data-k="switches.x_home" data-f="pressed" data-tone="pressed"></dd>
+          </div>
+          <div>
+            <dt>Tracking</dt>
+            <dd data-k="tracking.x.enabled" data-f="onoff" data-tone="bool-good"></dd>
+          </div>
+          <div>
+            <dt>Controller</dt>
+            <dd data-k="tracking.x.state" data-tone="state"></dd>
+          </div>
+          <div>
+            <dt>Gain / sign</dt>
+            <dd><span data-k="tracking.x.gain" data-f="f3"></span> st/px · <span data-k="tracking.x.sign"
+                data-f="sign"></span></dd>
+          </div>
+          <div>
+            <dt>Image shift</dt>
+            <dd data-k="tracking.x.px_per_step" data-f="pps"></dd>
+          </div>
+          <div>
+            <dt>Note</dt>
+            <dd data-k="tracking.x.note" data-f="text" class="warn-text"></dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span>Motor Y</span><span class="muted">Camera 2 · rotation</span></div>
+        <div class="gauge" data-gauge="motor_y.angle_deg" data-min="0" data-max="360" data-max-k="motor_y.travel_deg">
+          <div class="track">
+            <div class="marker"></div>
+          </div>
+          <div class="gauge-l"><span>0° switch</span><span>far switch</span></div>
+        </div>
+        <dl class="kv">
+          <div>
+            <dt>Angle</dt>
+            <dd data-k="motor_y.angle_deg" data-f="deg2"></dd>
+          </div>
+          <div>
+            <dt>Steps from switch</dt>
+            <dd data-k="motor_y.steps" data-f="int"></dd>
+          </div>
+          <div>
+            <dt>Measured travel</dt>
+            <dd><span data-k="motor_y.travel_steps" data-f="int"></span> st · <span data-k="motor_y.travel_deg"
+                data-f="deg1"></span></dd>
+          </div>
+          <div>
+            <dt>Soft limit (steps)</dt>
+            <dd><span data-k="motor_y.min_steps" data-f="int"></span> … <span data-k="motor_y.max_steps"
+                data-f="int"></span></dd>
+          </div>
+          <div>
+            <dt>Home / far switch</dt>
+            <dd><span data-k="switches.y_home" data-f="pressed" data-tone="pressed"></span> / <span
+                data-k="switches.y_far" data-f="pressed" data-tone="pressed"></span></dd>
+          </div>
+          <div>
+            <dt>Tracking</dt>
+            <dd data-k="tracking.y.enabled" data-f="onoff" data-tone="bool-good"></dd>
+          </div>
+          <div>
+            <dt>Controller</dt>
+            <dd data-k="tracking.y.state" data-tone="state"></dd>
+          </div>
+          <div>
+            <dt>Reversals</dt>
+            <dd><span data-k="tracking.y.reversals" data-f="int"></span>/<span data-k="tracking.y.max_reversals"
+                data-f="int"></span> · search <span data-k="tracking.y.search_reversals" data-f="int"></span>/<span
+                data-k="tracking.y.max_search_reversals" data-f="int"></span></dd>
+          </div>
+          <div>
+            <dt>Note</dt>
+            <dd data-k="tracking.y.note" data-f="text" class="warn-text"></dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span>IMU · gimbal Uno</span><span class="badge" data-k="imu.level" data-f="level"
+            data-tone="bool-good"></span></div>
+        <canvas id="imuChart" class="chart" height="120"></canvas>
+        <div class="legend"><span class="sw roll"></span>roll <span class="sw pitch"></span>pitch <span class="muted">·
+            last 30 s · dashed = ±<span data-k="imu.deadband_deg" data-f="int"></span>° level band</span></div>
+        <div class="gauge small" data-gauge="imu.roll_deg" data-min="-20" data-max="20" data-band="imu.deadband_deg">
+          <div class="track">
+            <div class="band"></div>
+            <div class="marker"></div>
+          </div>
+        </div>
+        <div class="gauge small" data-gauge="imu.pitch_deg" data-min="-20" data-max="20" data-band="imu.deadband_deg">
+          <div class="track">
+            <div class="band"></div>
+            <div class="marker"></div>
+          </div>
+        </div>
+        <dl class="kv">
+          <div>
+            <dt>Roll</dt>
+            <dd data-k="imu.roll_deg" data-f="sdeg2"></dd>
+          </div>
+          <div>
+            <dt>Pitch</dt>
+            <dd data-k="imu.pitch_deg" data-f="sdeg2"></dd>
+          </div>
+          <div>
+            <dt>Yaw</dt>
+            <dd data-k="imu.yaw_deg" data-f="sdeg2"></dd>
+          </div>
+          <div>
+            <dt>IMU link (Uno → ESP32)</dt>
+            <dd data-k="imu.status" data-f="imustatus" data-tone="imu"></dd>
+          </div>
+          <div>
+            <dt>Sample age</dt>
+            <dd data-k="imu.age_s" data-f="age"></dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span>Controls</span><span class="muted" id="cmdMsg"></span></div>
+        <div class="btns">
+          <button data-cmd="home" data-confirm="Home both motors? They will move to the limit switches.">Home both
+            motors</button>
+          <button data-toggle="x_tracking" data-path="tracking.x.enabled" data-label="X tracking">X tracking</button>
+          <button data-toggle="y_tracking" data-path="tracking.y.enabled" data-label="Y tracking">Y tracking</button>
+          <button data-cmd="nudge_x" data-steps="-50">X −50 st</button>
+          <button data-cmd="nudge_x" data-steps="50">X +50 st</button>
+          <button data-cmd="nudge_y" data-steps="-50">Y −50 st</button>
+          <button data-cmd="nudge_y" data-steps="50">Y +50 st</button>
+        </div>
+        <form id="gotoForm" class="goto">
+          <label for="gotoDeg">Move X to</label>
+          <input id="gotoDeg" type="number" step="0.1" min="-90" max="60" value="0" inputmode="decimal">
+          <span>°</span><button type="submit">Go</button>
+        </form>
+        <button id="reconnectBtn" data-cmd="reconnect" class="wide" hidden>Reconnect to ESP32</button>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span>System</span></div>
+        <dl class="kv">
+          <div>
+            <dt>Serial port</dt>
+            <dd data-k="link.port" data-f="text"></dd>
+          </div>
+          <div>
+            <dt>Homed</dt>
+            <dd data-k="link.homed" data-f="yesno" data-tone="bool-good"></dd>
+          </div>
+          <div>
+            <dt>ESP32 restarts</dt>
+            <dd data-k="link.restarts" data-f="int"></dd>
+          </div>
+          <div>
+            <dt>Switch data age</dt>
+            <dd data-k="switches.age_s" data-f="age"></dd>
+          </div>
+          <div>
+            <dt>Camera 1</dt>
+            <dd data-k="camera1.online" data-f="online" data-tone="bool-good"></dd>
+          </div>
+          <div>
+            <dt>Error</dt>
+            <dd data-k="link.error" data-f="text" class="warn-text"></dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><span>Event log</span></div>
+        <ul id="eventLog" class="events"></ul>
+      </div>
+    </aside>
+  </main>
+
+  <script src="{{ url_for('static', filename='optics.js') }}"></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+
+</html>

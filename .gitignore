@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+*.orig
+*.pid
+
+# Local runtime data
+captures/
+output/
+data/
+serial_logs/
+
+# Media / artifacts
+*.avi
+*.mp4
+*.png
+*.jpg
+*.jpeg
+
+# Arduino / embedded build output
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.a
+*.d
+
+# Local environment files
+.env
+.env.*
